@@ -7,26 +7,29 @@ typedef void (^PSYTimerBlock)(NSTimer *);
 @end
 
 @implementation NSTimer (Utils)
-+ (NSTimer *)scheduledTimerWithTimeInterval:(NSTimeInterval)seconds
-                                    repeats:(BOOL)repeats
-                                 usingBlock:(void (^)())fireBlock {
-  return [self scheduledTimerWithTimeInterval:seconds
-                                       target:self
-                                     selector:@selector
-                                     (PSYBlockTimer_executeBlockWithTimer:)
-                                     userInfo:[[fireBlock copy] autorelease]
-                                      repeats:repeats];
++ (NSTimer *)scheduledTimerWithTimeInterval:(NSTimeInterval)interval
+                                usingBlock:(void (^)(void))fireBlock {
+    return [NSTimer scheduledTimerWithTimeInterval:interval
+                                          target:self
+                                        selector:@selector(blockInvoke:)
+                                        userInfo:[fireBlock copy]
+                                         repeats:NO];
 }
 
-+ (NSTimer *)timerWithTimeInterval:(NSTimeInterval)seconds
-                           repeats:(BOOL)repeats
-                        usingBlock:(void (^)())fireBlock {
-  return [self
-      timerWithTimeInterval:seconds
-                     target:self
-                   selector:@selector(PSYBlockTimer_executeBlockWithTimer:)
-                   userInfo:[[fireBlock copy] autorelease]
-                    repeats:repeats];
++ (NSTimer *)timerWithTimeInterval:(NSTimeInterval)interval
+                       usingBlock:(void (^)(void))fireBlock {
+    return [NSTimer timerWithTimeInterval:interval
+                                 target:self
+                               selector:@selector(blockInvoke:)
+                               userInfo:[fireBlock copy]
+                                repeats:NO];
+}
+
++ (void)blockInvoke:(NSTimer *)timer {
+    void (^block)(void) = timer.userInfo;
+    if (block) {
+        block();
+    }
 }
 @end
 

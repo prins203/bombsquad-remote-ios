@@ -1,4 +1,3 @@
-
 #import "RemoteViewController.h"
 #import "AppController.h"
 #include <QuartzCore/CAAnimation.h>
@@ -134,6 +133,10 @@ static void readCallback(CFSocketRef cfSocket, CFSocketCallBackType type,
       [defaults objectForKey:@"controllerDPadSensitivity"] == nil
           ? DEFAULT_CONTROLLER_DPAD_SENSITIVITY
           : [defaults floatForKey:@"controllerDPadSensitivity"];
+
+  _joystickSize = [defaults objectForKey:@"joystickSize"] == nil
+                      ? 1.0
+                      : [defaults floatForKey:@"joystickSize"];
 
   _tiltNeutralY = [defaults objectForKey:@"tiltNeutralY"] == nil
                       ? -0.8
@@ -990,11 +993,13 @@ static void readCallback(CFSocketRef cfSocket, CFSocketCallBackType type,
   self.buttonImageJump = [[[UIImageView alloc]
       initWithImage:[UIImage imageNamed:@"buttonJump.png"]] autorelease];
   self.buttonImageJumpPressed = [[[UIImageView alloc]
-      initWithImage:[UIImage imageNamed:@"buttonJumpPressed.png"]] autorelease];
+      initWithImage:[UIImage imageNamed:@"buttonJumpPressed.png"]]
+      autorelease];
   self.buttonImageBomb = [[[UIImageView alloc]
       initWithImage:[UIImage imageNamed:@"buttonBomb.png"]] autorelease];
   self.buttonImageBombPressed = [[[UIImageView alloc]
-      initWithImage:[UIImage imageNamed:@"buttonBombPressed.png"]] autorelease];
+      initWithImage:[UIImage imageNamed:@"buttonBombPressed.png"]]
+      autorelease];
   self.dPadBacking = [[[UIView alloc] init] autorelease];
   self.dPadThumbImage = [[[UIImageView alloc]
       initWithImage:[UIImage imageNamed:@"thumb.png"]] autorelease];
@@ -1062,8 +1067,8 @@ static void readCallback(CFSocketRef cfSocket, CFSocketCallBackType type,
                          UIViewAutoresizingFlexibleBottomMargin;
     [self.view addSubview:v];
 
-    float thumbSize = 128;
-    float centerSize = 256;
+    float thumbSize = 128 * _joystickSize;
+    float centerSize = 256 * _joystickSize;
     float ins;
 
     // center
@@ -1440,6 +1445,53 @@ static void readCallback(CFSocketRef cfSocket, CFSocketCallBackType type,
   [self updateDPadBase];
 }
 
+- (void)joystickSizeChanged:(float)value {
+  _joystickSize = value;
+  
+  // Update the joystick size visually
+  float thumbSize = 128 * _joystickSize;
+  float centerSize = 256 * _joystickSize;
+  
+  CGRect fBase = self.dPadBacking.frame;
+  CGRect f;
+  float ins;
+  
+  // Update center image size
+  UIImageView *i = self.dPadCenterImage;
+  f = fBase;
+  ins = (fBase.size.width - centerSize) * 0.5;
+  f = CGRectInset(f, ins, ins);
+  f.origin.x -= _dPadBacking.frame.origin.x;
+  f.origin.y -= _dPadBacking.frame.origin.y;
+  i.frame = f;
+  
+  // Update thumb image size
+  i = self.dPadThumbImage;
+  f = fBase;
+  ins = (fBase.size.width - thumbSize) * 0.5;
+  f = CGRectInset(f, ins, ins);
+  f.origin.x -= _dPadBacking.frame.origin.x;
+  f.origin.y -= _dPadBacking.frame.origin.y;
+  i.frame = f;
+  
+  // Update pressed thumb image size
+  i = self.dPadThumbPressedImage;
+  f = fBase;
+  ins = (fBase.size.width - thumbSize) * 0.5;
+  f = CGRectInset(f, ins, ins);
+  f.origin.x -= _dPadBacking.frame.origin.x;
+  f.origin.y -= _dPadBacking.frame.origin.y;
+  i.frame = f;
+  
+  // Save the new size to user defaults
+  NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+  [defaults setFloat:value forKey:@"joystickSize"];
+  [defaults synchronize];
+  
+  // Update the joystick position
+  [self updateDPadBase];
+}
+
 - (void)leave {
   [self showActivityIndicator];
 
@@ -1597,554 +1649,90 @@ static void readCallback(CFSocketRef cfSocket, CFSocketCallBackType type,
   self.dPadCenterImage.frame = f;
 }
 
-- (void)setDPadX:(float)x
-            andY:(float)y
-      andPressed:(BOOL)pressed
-       andDirect:(BOOL)direct {
-  if (_usingProtocolV2) {
-    if (_buttonStateV2 & BS_REMOTE_STATE2_HOLD_POSITION)
-      pressed = NO;
-  } else {
-    if (_buttonStateV1 & BS_REMOTE_STATE_HOLD_POSITION)
-      pressed = NO;
-  }
+- (void)handleDpadInput:(float)xValue yValue:(float)yValue {
+    // Handle dpad input
+    [self handleJoystickInput:xValue yValue:yValue];
+}
 
-  float fullSpeedDist;
-
-  if (_tiltMode) {
-    fullSpeedDist = DPAD_FULL_SPEED_DIST_TILT;
-  } else if (_floating) {
-    fullSpeedDist = DPAD_FULL_SPEED_DIST_FLOATING;
-  } else {
-    fullSpeedDist = DPAD_FULL_SPEED_DIST;
-  }
-
-  if (direct) {
-    _dPadStateH = x;
-    _dPadStateV = y;
-  } else {
-    _dPadStateH = (x - _dPadBaseX) / fullSpeedDist;
-    _dPadStateV = (y - _dPadBaseY) / fullSpeedDist;
-  }
-
-  // keep our H/V values within a unit box
-  // (originally I clamped length to 1 but as a result our diagonal
-  // running speed was less than other analog controllers..)
-
-  if (_dPadStateH > 1.0) {
-    float mult = 1.0 / _dPadStateH;
-    _dPadStateH *= mult;
-    _dPadStateV *= mult;
-  } else if (_dPadStateH < -1.0) {
-    float mult = -1.0 / _dPadStateH;
-    _dPadStateH *= mult;
-    _dPadStateV *= mult;
-  }
-  if (_dPadStateV > 1.0) {
-    float mult = 1.0 / _dPadStateV;
-    _dPadStateH *= mult;
-    _dPadStateV *= mult;
-  } else if (_dPadStateV < -1.0) {
-    float mult = -1.0 / _dPadStateV;
-    _dPadStateH *= mult;
-    _dPadStateV *= mult;
-  }
-
-  float len = sqrt(_dPadStateH * _dPadStateH + _dPadStateV * _dPadStateV);
-  if (len < 1.0) {
-    // printf("len %f\n",len);
-  }
-
-#define RAD_TO_DEG(A) (A * (360.0 / (2.0 * 3.141592)))
-
-  // handle snapping if thats on
-  if (_axisSnapping and _dPadStateV != 0) {
-    float angle = RAD_TO_DEG(atan(_dPadStateH / _dPadStateV));
-    if (_dPadStateH > 0) {
-      if (angle > (90.0 - 22.5)) {
-        // right
-        _dPadStateV = 0.0;
-      } else if (angle > 45.0 - 22.5) {
-        // down-right
-        _dPadStateV = _dPadStateH = fmax(fabs(_dPadStateH), _dPadStateV);
-      } else if (angle > 0) {
-        // down
-        _dPadStateH = 0;
-      } else if (angle > -45.0 + 22.5) {
-        // up
-        _dPadStateH = 0;
-      } else if (angle > -45.0 - 22.5) {
-        // up-right
-        _dPadStateV = _dPadStateH = fmax(fabs(_dPadStateH), fabs(_dPadStateV));
-        _dPadStateV *= -1.0;
-      } else {
-        // right
-        _dPadStateV = 0;
-      }
+- (void)handleButtonA:(BOOL)pressed {
+    if (pressed) {
+        [self handleJumpPress];
     } else {
-      // left
-      if (angle > (90.0 - 22.5)) {
-        _dPadStateV = 0.0;
-      } else if (angle > 45.0 - 22.5) {
-        // up left
-        _dPadStateV = _dPadStateH = -fmax(fabs(_dPadStateH), fabs(_dPadStateV));
-      } else if (angle > 0) {
-        // up
-        _dPadStateH = 0;
-      } else if (angle > -45.0 + 22.5) {
-        _dPadStateH = 0;
-      } // down
-      else if (angle > -45.0 - 22.5) {
-        // down left
-        _dPadStateV = _dPadStateH = fmax(fabs(_dPadStateH), fabs(_dPadStateV));
-        _dPadStateH *= -1.0;
-      } else {
-        // left
-        _dPadStateV = 0;
-      }
+        [self handleJumpRelease];
     }
-  }
-
-  // now translate back to x/y so we can see the results of axis-snapping/etc
-  float visScale = _tiltMode ? 5.0 : 1.0;
-  x = fullSpeedDist * _dPadStateH * visScale + _dPadBaseX;
-  y = fullSpeedDist * _dPadStateV * visScale + _dPadBaseY;
-
-  [self doStateChangeForced:NO];
-
-  // do our image updating after we've sent our state changed message..
-  // (in case this takes a substantial amount of time)
-  CGRect f = self.dPadThumbImage.frame;
-  CGRect fBack = self.dPadBacking.frame;
-  fBack.origin.x = 0;
-  fBack.origin.y = 0;
-  f.origin = fBack.origin;
-  f.origin.x += fBack.size.width / 2.0 - f.size.width / 2.0;
-  f.origin.y += fBack.size.height / 2.0 - f.size.height / 2.0;
-  f.origin.x += x * fBack.size.width / 2.0;
-  f.origin.y += y * fBack.size.width / 2.0;
-  self.dPadThumbImage.frame = f;
-  self.dPadThumbPressedImage.frame = f;
-
-  _dPadThumbImage.hidden = (pressed);
-  _dPadThumbPressedImage.hidden = (not pressed);
 }
 
-- (void)updateButtonsForTouches {
-  BOOL punchHeld = NO;
-  BOOL throwHeld = NO;
-  BOOL jumpHeld = NO;
-  BOOL bombHeld = NO;
-
-  for (UITouch *touch in self.validTouches) {
-
-    // ignore dpad touch
-    if (touch == _dPadTouch)
-      continue;
-
-    // get the touch in button-coords
-    // lets get a point in our button section normalized to -1-to-1 scale
-    CGPoint p = [self getPointInImageSpace:self.buttonBacking
-                                  forPoint:[touch locationInView:self.view]];
-
-    float threshold = 0.3;
-    CGPoint pb, pb2;
-    float xDiff, yDiff, len;
-    float punchLen, jumpLen, throwLen, bombLen;
-    UIImageView *img;
-
-    // count moved touches that are near enough to a button as a press
-    BOOL isMove = ([self.validMovedTouches containsObject:touch]);
-
-    // punch
-    img = _buttonImagePunch;
-    pb.x = img.frame.origin.x + img.frame.size.width / 2.0;
-    pb.y = img.frame.origin.y + img.frame.size.height / 2.0;
-    pb.x += _buttonBacking.frame.origin.x;
-    pb.y += _buttonBacking.frame.origin.y;
-    pb2 = [self getPointInImageSpace:self.buttonBacking forPoint:pb];
-    xDiff = p.x - pb2.x;
-    yDiff = p.y - pb2.y;
-    punchLen = len = sqrt(xDiff * xDiff + yDiff * yDiff);
-    if (isMove && len < threshold) {
-      punchHeld = YES;
+- (void)handleButtonB:(BOOL)pressed {
+    if (pressed) {
+        [self handleBombPress];
+    } else {
+        [self handleBombRelease];
     }
+}
 
-    // throw
-    img = _buttonImageThrow;
-    pb.x = img.frame.origin.x + img.frame.size.width / 2.0;
-    pb.y = img.frame.origin.y + img.frame.size.height / 2.0;
-    pb.x += _buttonBacking.frame.origin.x;
-    pb.y += _buttonBacking.frame.origin.y;
-    pb2 = [self getPointInImageSpace:self.buttonBacking forPoint:pb];
-    xDiff = p.x - pb2.x;
-    yDiff = p.y - pb2.y;
-    throwLen = len = sqrt(xDiff * xDiff + yDiff * yDiff);
-    if (isMove && len < threshold) {
-      throwHeld = YES;
+- (void)handleButtonX:(BOOL)pressed {
+    if (pressed) {
+        [self handlePunchPress];
+    } else {
+        [self handlePunchRelease];
     }
+}
 
-    // jump
-    img = _buttonImageJump;
-    pb.x = img.frame.origin.x + img.frame.size.width / 2.0;
-    pb.y = img.frame.origin.y + img.frame.size.height / 2.0;
-    pb.x += _buttonBacking.frame.origin.x;
-    pb.y += _buttonBacking.frame.origin.y;
-    pb2 = [self getPointInImageSpace:self.buttonBacking forPoint:pb];
-    xDiff = p.x - pb2.x;
-    yDiff = p.y - pb2.y;
-    jumpLen = len = sqrt(xDiff * xDiff + yDiff * yDiff);
-    if (isMove && len < threshold) {
-      jumpHeld = YES;
+- (void)handleButtonY:(BOOL)pressed {
+    if (pressed) {
+        [self handleThrowPress];
+    } else {
+        [self handleThrowRelease];
     }
+}
 
-    // bomb
-    img = _buttonImageBomb;
-    pb.x = img.frame.origin.x + img.frame.size.width / 2.0;
-    pb.y = img.frame.origin.y + img.frame.size.height / 2.0;
-    pb.x += _buttonBacking.frame.origin.x;
-    pb.y += _buttonBacking.frame.origin.y;
-    pb2 = [self getPointInImageSpace:self.buttonBacking forPoint:pb];
-    xDiff = p.x - pb2.x;
-    yDiff = p.y - pb2.y;
-    bombLen = len = sqrt(xDiff * xDiff + yDiff * yDiff);
-    if (isMove && len < threshold) {
-      bombHeld = YES;
+- (void)handleLeftShoulder:(BOOL)pressed {
+    if (pressed) {
+        [self handleRun1Press];
+    } else {
+        [self handleRun1Release];
     }
+}
 
-    // ok now lets take care of fringe areas and non-moved touches
-    // a touch in our button area should *always* affect at least one button
-    // ..so lets find the closest button and press it.
-    // this will probably coincide with what we just set above but thats ok.
-    if (p.x > -1.0 * BUTTON_BUFFER and p.x < 1.0 * BUTTON_BUFFER and
-        p.y > -1.0 * BUTTON_BUFFER and p.y < 1.0 * BUTTON_BUFFER) {
-
-      if (punchLen < throwLen and punchLen < jumpLen and punchLen < bombLen) {
-        punchHeld = YES;
-      } else if (throwLen < punchLen and throwLen < jumpLen and
-                 throwLen < bombLen) {
-        throwHeld = YES;
-      } else if (jumpLen < punchLen and jumpLen < throwLen and
-                 jumpLen < bombLen) {
-        jumpHeld = YES;
-      } else {
-        bombHeld = YES;
-      }
+- (void)handleRightShoulder:(BOOL)pressed {
+    if (pressed) {
+        [self handleRun2Press];
+    } else {
+        [self handleRun2Release];
     }
-  }
-
-  // lets just look at v1 values for now since we set both v1 and v2 identically
-  bool throwWasHeld = (_buttonStateV1 & BS_REMOTE_STATE_THROW);
-  bool jumpWasHeld = (_buttonStateV1 & BS_REMOTE_STATE_JUMP);
-  bool punchWasHeld = (_buttonStateV1 & BS_REMOTE_STATE_PUNCH);
-  bool bombWasHeld = (_buttonStateV1 & BS_REMOTE_STATE_BOMB);
-
-  // send press events for non-held ones we're now over
-  if (not throwWasHeld and throwHeld) {
-    [self handleThrowPress];
-  }
-  if (not punchWasHeld and punchHeld) {
-    [self handlePunchPress];
-  }
-  if (not jumpWasHeld and jumpHeld) {
-    [self handleJumpPress];
-  }
-  if (not bombWasHeld and bombHeld) {
-    [self handleBombPress];
-  }
-
-  // ok now send release events for ones that used to be held
-  if (punchWasHeld and not punchHeld) {
-    // printf("PUNCH RELEASED\n");
-    [self handlePunchRelease];
-  }
-  if (throwWasHeld and not throwHeld) {
-    // printf("THROW RELEASED\n");
-    [self handleThrowRelease];
-  }
-  if (jumpWasHeld and not jumpHeld) {
-    // printf("JUMP RELEASED\n");
-    [self handleJumpRelease];
-  }
-  if (bombWasHeld and not bombHeld) {
-    // printf("BOMB RELEASED\n");
-    [self handleBombRelease];
-  }
 }
 
-- (void)touchesMoved:(NSSet *)touches withEvent:(UIEvent *)event {
-  for (UITouch *touch in touches) {
-
-    [self.validMovedTouches addObject:touch];
-
-    // handle d-pad
-    if (touch == _dPadTouch) {
-
-      if (_tiltMode) {
-
-        // ignore..
-
-      } else {
-
-        // joystick mode
-
-        CGPoint pView = [touch locationInView:self.view];
-
-        // keep it to the left half of the device at least..
-        pView.x = fmin(pView.x, self.view.frame.size.width / 2);
-
-        pView.y = fmax(pView.y, self.view.frame.size.height * 0.2);
-
-        CGPoint pd = [self getPointInImageSpace:self.dPadBacking
-                                       forPoint:pView];
-
-        // if this is our first motion sample for this touch, move the dpad base
-        // here
-        if (_floating and (!_dPadHasMoved)) {
-          _dPadBaseX = pd.x;
-          _dPadBaseY = pd.y;
-        }
-        _dPadHasMoved = YES;
-
-        [self setDPadX:pd.x andY:pd.y andPressed:YES andDirect:NO];
-
-        // if our thumb has gotten far away from our base, pull it towards us
-        float xdiff = pd.x - _dPadBaseX;
-        float ydiff = pd.y - _dPadBaseY;
-        float dist = sqrt(xdiff * xdiff + ydiff * ydiff);
-        BOOL follow = _floating ? (dist > DPAD_DRAG_DIST) : 0;
-        if (follow) {
-          float scale = DPAD_DRAG_DIST / dist;
-          _dPadBaseX = pd.x - scale * xdiff;
-          _dPadBaseY = pd.y - scale * ydiff;
-          [self updateDPadBase];
-        } else if (_needToUpdateDPadBase) {
-          [self updateDPadBase];
-        }
-        _needToUpdateDPadBase = NO;
-      }
+- (void)handleLeftTrigger:(BOOL)pressed {
+    if (pressed) {
+        [self handleRun1Press];
+    } else {
+        [self handleRun1Release];
     }
-  }
-  [self updateButtonsForTouches];
 }
 
-- (void)touchesEnded:(NSSet *)touches withEvent:(UIEvent *)event {
-
-  // lets go through all active touches and see what buttons we're still
-  // hitting.. cancel the ones that we aren't.
-
-  // first look for our d-pad-touch in here
-  for (UITouch *touch in touches) {
-
-    [self.validTouches removeObject:touch];
-    [self.validMovedTouches removeObject:touch];
-
-    // if our dpad touch is coming up, snap back to zero
-    if (touch == _dPadTouch) {
-
-      if (_tiltMode) {
-        // when our dpad-finger comes up, brakes go on
-        _buttonStateV1 |= BS_REMOTE_STATE_HOLD_POSITION;
-        _buttonStateV2 |= BS_REMOTE_STATE2_HOLD_POSITION;
-        [self doStateChangeForced:NO];
-      } else {
-        // joystick mode
-        // special case.. if we had a short lived dpad-touch with no motion,
-        // register it as a quick joystick snap; useful for nav and stuff.
-        // To do this we snap the dpad-base back to where it was before the
-        // touch
-        if (_floating and CACurrentMediaTime() - _lastDPadTouchTime < 0.3 and
-            not _dPadHasMoved) {
-          CGPoint pView = [touch locationInView:self.view];
-          CGPoint pd = [self getPointInImageSpace:self.dPadBacking
-                                         forPoint:pView];
-          _dPadBaseX = _lastDPadTouchPosX;
-          _dPadBaseY = _lastDPadTouchPosY;
-
-          // we want this touch to be directly above/below or left/right of the
-          // base.. this makes interface stuff behave better (which is what this
-          // special case is for)
-          // ...otherwise we can run into cases where the horizontal joy event
-          // gets processed first and is enough to trigger a left/right even
-          // though the vertical component (which hasnt come through yet) is
-          // greater.
-          float xDiff = pd.x - _lastDPadTouchPosX;
-          float yDiff = pd.y - _lastDPadTouchPosY;
-          if (fabs(xDiff) > fabs(yDiff)) {
-            yDiff = 0;
-          } else {
-            xDiff = 0;
-          }
-          [self setDPadX:_lastDPadTouchPosX + xDiff
-                    andY:_lastDPadTouchPosY + yDiff
-              andPressed:YES
-               andDirect:NO];
-        }
-
-        // releasing the joystick always lets off the brake too..
-        _buttonStateV1 &= ~BS_REMOTE_STATE_HOLD_POSITION;
-        _buttonStateV2 &= ~BS_REMOTE_STATE2_HOLD_POSITION;
-        [self doStateChangeForced:NO];
-      }
-
-      // in tilt mode we just update pos as normal but flip pressed to off
-      if (_tiltMode) {
-        [self setDPadX:_prevAccelX andY:_prevAccelY andPressed:NO andDirect:NO];
-      } else {
-        // in joystick mode we snap back to zero
-        _dPadBaseX = 0;
-        _dPadBaseY = DPAD_NEUTRAL_Y;
-        [self setDPadX:0 andY:0 andPressed:NO andDirect:NO];
-        [self updateDPadBase];
-      }
-      _dPadTouch = NULL;
-      continue;
+- (void)handleRightTrigger:(BOOL)pressed {
+    if (pressed) {
+        [self handleRun2Press];
+    } else {
+        [self handleRun2Release];
     }
-  }
-  [self updateButtonsForTouches];
 }
 
-- (void)touchesCanceled:(NSSet *)touches withEvent:(UIEvent *)event {
-  // hopefully this is ok?...
-  [self touchesEnded:touches withEvent:event];
+- (void)handleLeftThumbstick:(float)xValue yValue:(float)yValue {
+    [self handleJoystickInput:xValue yValue:yValue];
 }
 
-- (void)hardwareDPadChangedX:(float)x andY:(float)y {
-  // we filter dpad values based on our sensitivity setting
-  // sensitivity of 1 means that any non-zero value is pulled 100%
-  if (x != 0.0) {
-    float sign = (x > 0.0) ? 1.0 : -1.0;
-    x = sign * pow(fabs(x), 1.0f - _controllerDPadSensitivity);
-  }
-  if (y != 0.0) {
-    float sign = (y > 0.0) ? 1.0 : -1.0;
-    y = sign * pow(fabs(y), 1.0f - _controllerDPadSensitivity);
-  }
-  [self setDPadX:x andY:-y andPressed:0 andDirect:YES];
+- (void)handleAccelerometerData:(CMAccelerometerData *)accelerometerData {
+    // Handle accelerometer data
+    float x = accelerometerData.acceleration.x;
+    float y = accelerometerData.acceleration.y;
+    float z = accelerometerData.acceleration.z;
+    
+    // Convert accelerometer data to joystick input
+    float joystickX = x * 2.0f; // Scale as needed
+    float joystickY = y * 2.0f; // Scale as needed
+    
+    [self handleJoystickInput:joystickX yValue:joystickY];
 }
-
-- (void)hardwareStickChangedX:(float)x andY:(float)y {
-  [self setDPadX:x andY:-y andPressed:0 andDirect:YES];
-}
-
-- (void)accelerometer:(UIAccelerometer *)accelerometer
-        didAccelerate:(UIAcceleration *)acceleration {
-
-  // ignore these in non-tilt-modes
-  if (!_tiltMode) {
-    return;
-  }
-
-  float rawX;
-  float rawY;
-  float rawZ;
-
-  switch (self.interfaceOrientation) {
-  case UIInterfaceOrientationPortrait:
-    rawX = acceleration.x;
-    rawY = acceleration.y;
-    rawZ = acceleration.z;
-    break;
-  case UIInterfaceOrientationPortraitUpsideDown:
-    rawX = -acceleration.x;
-    rawY = -acceleration.y;
-    rawZ = acceleration.z;
-    break;
-  case UIInterfaceOrientationLandscapeLeft:
-    rawX = acceleration.y;
-    rawY = -acceleration.x;
-    rawZ = acceleration.z;
-    break;
-  case UIInterfaceOrientationLandscapeRight:
-    rawX = -acceleration.y;
-    rawY = acceleration.x;
-    rawZ = acceleration.z;
-    break;
-  default:
-    rawX = rawZ = rawY = 0.0;
-    break;
-  }
-
-  float x = rawX * 0.5;
-  float y = (rawZ + 0.45) * 0.5;
-
-  // float tilt = acos(_tiltNeutralY*rawY+_tiltNeutralZ*rawZ);
-  float angle = atan2(rawZ, rawY) - atan2(_tiltNeutralZ, _tiltNeutralY);
-  // printf("angle %f\n",angle);
-  if (angle < -3.141592) {
-    angle += 2.0 * 3.141592;
-  } else if (angle > 3.141592) {
-    angle -= 2.0 * 3.141592;
-  }
-
-  y = -angle * 0.7;
-
-  // remap so we have a section of zero at the bottom
-  float len = sqrt(x * x + y * y);
-  float newLen = len - 0.02;
-  if (newLen <= 0) {
-    x = y = 0;
-  } else {
-    x *= newLen / len;
-    y *= newLen / len;
-  }
-
-  float weight = 0.5;
-  // average with whats already there
-  x = weight * x + (1.0 - weight) * _prevAccelX;
-  y = weight * y + (1.0 - weight) * _prevAccelY;
-  _prevAccelX = x;
-  _prevAccelY = y;
-
-  [self setDPadX:x andY:y andPressed:(_dPadTouch != nil) andDirect:NO];
-}
-
-- (void)dealloc {
-
-  if (gRemoteViewController != self)
-    NSLog(@"ERROR: gRemoteViewController not us on shutdown!");
-  gRemoteViewController = nil;
-
-  [_processTimer invalidate];
-  self.processTimer = nil;
-
-  if (_cfSocket4) {
-    CFSocketInvalidate(_cfSocket4);
-    CFRelease(_cfSocket4);
-    _cfSocket4 = NULL;
-  }
-  if (_cfSocket6) {
-    CFSocketInvalidate(_cfSocket6);
-    CFRelease(_cfSocket6);
-    _cfSocket6 = NULL;
-  }
-
-  self.buttonBacking = nil;
-  self.buttonImageJump = nil;
-  self.buttonImageJumpPressed = nil;
-  self.buttonImageThrow = nil;
-  self.buttonImageThrowPressed = nil;
-  self.buttonImagePunch = nil;
-  self.buttonImagePunchPressed = nil;
-  self.buttonImageBomb = nil;
-  self.buttonImageBombPressed = nil;
-  self.dPadBacking = nil;
-  self.dPadThumbImage = nil;
-  self.dPadThumbPressedImage = nil;
-  self.dPadCenterImage = nil;
-  self.bgImage = nil;
-
-  self.validTouches = nil;
-  self.validMovedTouches = nil;
-
-  self.lagMeter = nil;
-
-  [super dealloc];
-}
-
-@end
-
-#pragma mark -
-@implementation RemoteViewController (NSStreamDelegate)
 
 @end

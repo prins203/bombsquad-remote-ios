@@ -27,6 +27,7 @@ using namespace std;
 - (void)showManualConnectDialog;
 - (void)showSetNameDialog;
 - (void)update:(NSTimer *)timer;
+- (void)connectToServer:(NSString *)address;
 
 @end
 
@@ -374,108 +375,62 @@ static void readCallback(CFSocketRef cfSocket, CFSocketCallBackType type,
 
 - (void)showSetNameDialog {
   _doingNameDialog = true;
-  UIAlertView *alert = [[UIAlertView alloc] initWithTitle:@"Player Name"
-                                                  message:nil
-                                                 delegate:self
-                                        cancelButtonTitle:@"Cancel"
-                                        otherButtonTitles:@"OK", nil];
-  alert.alertViewStyle = UIAlertViewStylePlainTextInput;
-  UITextField *alertTextField = [alert textFieldAtIndex:0];
-  alertTextField.delegate = self;
-  alertTextField.keyboardType = UIKeyboardTypeDefault;
-  alertTextField.placeholder = @"Enter a name";
-  alertTextField.text = [AppController playerName];
-  [alert show];
+  UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Player Name"
+                                                              message:@"Enter your name:"
+                                                       preferredStyle:UIAlertControllerStyleAlert];
+  
+  [alert addTextFieldWithConfigurationHandler:^(UITextField *textField) {
+      textField.placeholder = @"Name";
+      textField.text = [[NSUserDefaults standardUserDefaults] stringForKey:@"playerName"];
+  }];
+  
+  UIAlertAction *okAction = [UIAlertAction actionWithTitle:@"OK"
+                                                    style:UIAlertActionStyleDefault
+                                                  handler:^(UIAlertAction *action) {
+          NSString *name = alert.textFields.firstObject.text;
+          [[NSUserDefaults standardUserDefaults] setObject:name forKey:@"playerName"];
+          [self connectToServer];
+      }];
+  
+  UIAlertAction *cancelAction = [UIAlertAction actionWithTitle:@"Cancel"
+                                                    style:UIAlertActionStyleCancel
+                                                  handler:nil];
+  
+  [alert addAction:okAction];
+  [alert addAction:cancelAction];
+  [self presentViewController:alert animated:YES completion:nil];
 }
 
 - (void)showManualConnectDialog {
   _doingNameDialog = false;
-  UIAlertView *alert = [[UIAlertView alloc] initWithTitle:@"Connect by Address"
-                                                  message:nil
-                                                 delegate:self
-                                        cancelButtonTitle:@"Cancel"
-                                        otherButtonTitles:@"Connect", nil];
-  alert.alertViewStyle = UIAlertViewStylePlainTextInput;
-  UITextField *alertTextField = [alert textFieldAtIndex:0];
-  alertTextField.keyboardType = UIKeyboardTypeDefault;
-  alertTextField.placeholder = @"Enter an address";
-  NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
-  if ([defaults objectForKey:@"manualAddress"] != nil) {
-    alertTextField.text = [defaults stringForKey:@"manualAddress"];
-  }
-  [alert show];
-}
-
-- (void)alertView:(UIAlertView *)alertView
-    willDismissWithButtonIndex:(NSInteger)buttonIndex {
-  if (buttonIndex == alertView.cancelButtonIndex) {
-    // they canceled; do nothing
-  } else {
-    UITextField *t = [alertView textFieldAtIndex:0];
-    if (t != nil) {
-      // either set a name or connect to an address...
-      if (_doingNameDialog) {
-        [[NSUserDefaults standardUserDefaults] setObject:t.text
-                                                  forKey:@"playerName"];
-        [[NSUserDefaults standardUserDefaults] synchronize];
-        NSString *s =
-            [NSString stringWithFormat:@"Name: %@", [AppController playerName]];
-        [_nameButton setTitle:s forState:UIControlStateNormal];
-
-      } else {
-        [[NSUserDefaults standardUserDefaults] setObject:t.text
-                                                  forKey:@"manualAddress"];
-        [[NSUserDefaults standardUserDefaults] synchronize];
-
-        struct addrinfo hints, *res, *p;
-        int status;
-        char ipstr[INET6_ADDRSTRLEN];
-        memset(&hints, 0, sizeof hints);
-        hints.ai_family = AF_UNSPEC; // AF_INET or AF_INET6 to force version
-        hints.ai_socktype = SOCK_STREAM;
-        if ((status = getaddrinfo(t.text.UTF8String, NULL, &hints, &res)) !=
-            0) {
-          return;
-        }
-        for (p = res; p != NULL; p = p->ai_next) {
-          void *addr;
-          const char *ipver;
-          // get the pointer to the address itself,
-          // different fields in IPv4 and IPv6:
-          if (p->ai_family == AF_INET) { // IPv4
-            struct sockaddr_in *ipv4 = (struct sockaddr_in *)p->ai_addr;
-            addr = &(ipv4->sin_addr);
-            ipv4->sin_port = htons(43210);
-            ipver = "IPv4";
-          } else { // IPv6
-            struct sockaddr_in6 *ipv6 = (struct sockaddr_in6 *)p->ai_addr;
-            addr = &(ipv6->sin6_addr);
-            ipv6->sin6_port = htons(43210);
-            ipver = "IPv6";
-          }
-
-          // convert the IP to a string and print it:
-          inet_ntop(p->ai_family, addr, ipstr, sizeof ipstr);
-          NSLog(@"  %s: %s\n", ipver, ipstr);
-
-          [[AppController sharedApp] browserViewController:self
-                                          didSelectAddress:p->ai_addr
-                                                  withSize:p->ai_addrlen];
-          break; // only do first
-        }
-
-        freeaddrinfo(res); // free the linked list
-      }
-    }
-  }
+  UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Connect by Address"
+                                                              message:@"Enter server address:"
+                                                       preferredStyle:UIAlertControllerStyleAlert];
+  
+  [alert addTextFieldWithConfigurationHandler:^(UITextField *textField) {
+      textField.placeholder = @"Address";
+      textField.keyboardType = UIKeyboardTypeNumbersAndPunctuation;
+  }];
+  
+  UIAlertAction *okAction = [UIAlertAction actionWithTitle:@"OK"
+                                                    style:UIAlertActionStyleDefault
+                                                  handler:^(UIAlertAction *action) {
+          NSString *address = alert.textFields.firstObject.text;
+          [self connectToServer:address];
+      }];
+  
+  UIAlertAction *cancelAction = [UIAlertAction actionWithTitle:@"Cancel"
+                                                    style:UIAlertActionStyleCancel
+                                                  handler:nil];
+  
+  [alert addAction:okAction];
+  [alert addAction:cancelAction];
+  [self presentViewController:alert animated:YES completion:nil];
 }
 
 - (void)showHelp {
-  HelpViewController *vc =
-      [[[HelpViewController alloc] initWithNibName:@"HelpViewController"
-                                            bundle:nil] autorelease];
-  vc.modalTransitionStyle = UIModalTransitionStyleFlipHorizontal;
-  [self presentModalViewController:vc animated:YES];
+  HelpViewController *vc = [[HelpViewController alloc] init];
+  [self presentViewController:vc animated:YES completion:nil];
 }
 
 - (void)showPrefs {
@@ -572,17 +527,14 @@ static void readCallback(CFSocketRef cfSocket, CFSocketCallBackType type,
 - (UITableViewCell *)tableView:(UITableView *)tableView
          cellForRowAtIndexPath:(NSIndexPath *)indexPath {
 
-  static NSString *tableCellIdentifier = @"UITableViewCell";
-  UITableViewCell *cell = (UITableViewCell *)[tableView
-      dequeueReusableCellWithIdentifier:tableCellIdentifier];
+  static NSString *CellIdentifier = @"Cell";
+  
+  UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:CellIdentifier];
   if (cell == nil) {
-    cell = [[[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault
-                                   reuseIdentifier:tableCellIdentifier]
-        autorelease];
-    cell.textLabel.textAlignment = UITextAlignmentCenter;
-    cell.backgroundColor = [UIColor clearColor];
+    cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault
+                                 reuseIdentifier:CellIdentifier];
   }
-
+  
   if (_games.size() == 0 and self.searchingForServicesString) {
     // If there are no services and searchingForServicesString is set, show one
     // row explaining that to the user.
@@ -771,15 +723,12 @@ static void readCallback(CFSocketRef cfSocket, CFSocketCallBackType type,
   }
 }
 
-- (BOOL)shouldAutorotateToInterfaceOrientation:
-    (UIInterfaceOrientation)interfaceOrientationIn {
-  // iPad works any which way.. iPhone only landscape
-  if (UI_USER_INTERFACE_IDIOM() == UIUserInterfaceIdiomPad) {
-    return YES;
-  } else {
-    return (interfaceOrientationIn == UIInterfaceOrientationLandscapeLeft ||
-            interfaceOrientationIn == UIInterfaceOrientationLandscapeRight);
-  }
+- (BOOL)shouldAutorotate {
+  return YES;
+}
+
+- (UIInterfaceOrientationMask)supportedInterfaceOrientations {
+  return UIInterfaceOrientationMaskAll;
 }
 
 - (void)dealloc {
@@ -789,6 +738,79 @@ static void readCallback(CFSocketRef cfSocket, CFSocketCallBackType type,
   self.logo = nil;
   self.titleTimer = nil;
   [super dealloc];
+}
+
+- (void)connectToServer {
+    NSString *address = [[NSUserDefaults standardUserDefaults] stringForKey:@"manualAddress"];
+    if (!address) return;
+    
+    struct addrinfo hints;
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+    
+    struct addrinfo *result;
+    int status = getaddrinfo([address UTF8String], NULL, &hints, &result);
+    if (status != 0) {
+        NSLog(@"getaddrinfo error: %s", gai_strerror(status));
+        return;
+    }
+    
+    char ipstr[INET6_ADDRSTRLEN];
+    void *addr;
+    if (result->ai_family == AF_INET) {
+        struct sockaddr_in *ipv4 = (struct sockaddr_in *)result->ai_addr;
+        addr = &(ipv4->sin_addr);
+    } else {
+        struct sockaddr_in6 *ipv6 = (struct sockaddr_in6 *)result->ai_addr;
+        addr = &(ipv6->sin6_addr);
+    }
+    
+    inet_ntop(result->ai_family, addr, ipstr, sizeof(ipstr));
+    NSLog(@"Resolved address: %s", ipstr);
+    
+    [[AppController sharedInstance] browserViewController:self didSelectAddress:result->ai_addr withSize:result->ai_addrlen];
+    freeaddrinfo(result);
+}
+
+- (void)connectToServer:(NSString *)address {
+    // Store the address in user defaults
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    [defaults setObject:address forKey:@"lastConnectedServer"];
+    [defaults synchronize];
+    
+    // Set up hints for getaddrinfo
+    struct addrinfo hints;
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_UNSPEC;     // Allow IPv4 or IPv6
+    hints.ai_socktype = SOCK_STREAM; // TCP stream sockets
+    
+    // Get address info
+    struct addrinfo *result;
+    int status = getaddrinfo([address UTF8String], NULL, &hints, &result);
+    if (status != 0) {
+        NSLog(@"getaddrinfo error: %s", gai_strerror(status));
+        return;
+    }
+    
+    // Log the resolved IP address
+    char ipstr[INET6_ADDRSTRLEN];
+    void *addr;
+    if (result->ai_family == AF_INET) {
+        struct sockaddr_in *ipv4 = (struct sockaddr_in *)result->ai_addr;
+        addr = &(ipv4->sin_addr);
+    } else {
+        struct sockaddr_in6 *ipv6 = (struct sockaddr_in6 *)result->ai_addr;
+        addr = &(ipv6->sin6_addr);
+    }
+    inet_ntop(result->ai_family, addr, ipstr, sizeof(ipstr));
+    NSLog(@"Resolved address: %s", ipstr);
+    
+    // Notify AppController with the resolved address
+    [[AppController sharedInstance] didSelectAddress:result->ai_addr withSize:result->ai_addrlen];
+    
+    // Free the address info
+    freeaddrinfo(result);
 }
 
 @end

@@ -1,6 +1,8 @@
 #import "BrowserViewController.h"
 #import "HoverView.h"
 #import "RemoteViewController.h"
+#import <UIKit/UIKit.h>
+#import <GameController/GameController.h>
 
 // The Bonjour application protocol, which must:
 // 1) be no longer than 14 characters
@@ -13,6 +15,9 @@
 
 #define DEFAULT_CONTROLLER_DPAD_SENSITIVITY 0.5
 
+// Forward declaration
+@class RemoteViewController;
+
 @interface AppController
     : NSObject <UIApplicationDelegate, UIActionSheetDelegate,
                 BrowserViewControllerDelegate, UITextFieldDelegate,
@@ -23,8 +28,12 @@
   float _accelZ;
 
   UISlider *_dPadSlider;
+
+  UIWindow* _window;
+  RemoteViewController* _remoteViewController;
 }
 
++ (AppController *)sharedInstance;
 + (AppController *)sharedApp;
 + (NSString *)playerName;
 + (void)debugPrint:(NSString *)s;
@@ -42,5 +51,24 @@
 @property(nonatomic, retain) UISegmentedControl *joystickStyleControl;
 
 @property(nonatomic, retain) UIImageView *logoImage;
+
+@property (nonatomic, retain) RemoteViewController* remoteViewController;
+
+- (void)setupGameController:(GCController*)controller;
+- (void)handleDpadInput:(float)xValue yValue:(float)yValue;
+- (void)handleButtonA:(BOOL)pressed;
+- (void)handleButtonB:(BOOL)pressed;
+- (void)handleButtonX:(BOOL)pressed;
+- (void)handleButtonY:(BOOL)pressed;
+- (void)handleLeftShoulder:(BOOL)pressed;
+- (void)handleRightShoulder:(BOOL)pressed;
+- (void)handleLeftTrigger:(BOOL)pressed;
+- (void)handleRightTrigger:(BOOL)pressed;
+- (void)handleLeftThumbstick:(float)xValue yValue:(float)yValue;
+
+// Add method declarations
+- (void)didSelectAddress:(struct sockaddr*)addr withSize:(socklen_t)size;
+- (void)controllerConnected:(NSNotification*)notification;
+- (void)controllerDisconnected:(NSNotification*)notification;
 
 @end

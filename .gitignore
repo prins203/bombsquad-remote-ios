@@ -1,5 +1,13 @@
+# macOS system files
 .DS_Store
 
-## xcode
+# Xcode
 xcuserdata/
+build/
+BSRemote.xcodeproj/
+
+# Build products
+*.ipa
+*.dSYM.zip
+*.dSYM
 

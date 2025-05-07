@@ -3,7 +3,12 @@
 #import "NSTimerUtils.h"
 #import "RemoteViewController.h"
 #import "UIViewUtilities.h"
+#import <GameController/GameController.h>
+#import <GameController/GCExtendedGamepad.h>
 #import <GameController/GCController.h>
+#import <GameController/GCControllerButtonInput.h>
+#import <GameController/GCControllerDirectionPad.h>
+#import <CoreMotion/CoreMotion.h>
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
@@ -13,6 +18,22 @@
 - (void)tiltModeChanged:(id)sender;
 - (void)joystickFloatingChanged:(id)sender;
 - (void)setTiltNeutral;
+- (void)handleDpadInput:(float)xValue yValue:(float)yValue;
+- (void)handleButtonA:(BOOL)pressed;
+- (void)handleButtonB:(BOOL)pressed;
+- (void)handleButtonX:(BOOL)pressed;
+- (void)handleButtonY:(BOOL)pressed;
+- (void)handleLeftShoulder:(BOOL)pressed;
+- (void)handleRightShoulder:(BOOL)pressed;
+- (void)handleLeftTrigger:(BOOL)pressed;
+- (void)handleRightTrigger:(BOOL)pressed;
+- (void)handleLeftThumbstick:(float)xValue yValue:(float)yValue;
+- (void)setupGameController:(GCController *)controller;
+@property (nonatomic, strong) CMMotionManager *motionManager;
+@property (nonatomic, assign) float accelX;
+@property (nonatomic, assign) float accelY;
+@property (nonatomic, assign) float accelZ;
+@property (nonatomic, strong) UISlider *joystickSizeSlider;
 @end
 
 #define ACCELEROMETER_UPDATE_RATE 1.0 / 30.0
@@ -29,18 +50,63 @@
 @synthesize setTiltNeutralButton = _setTiltNeutralButton;
 @synthesize joystickStyleLabel = _joystickStyleLabel;
 @synthesize joystickStyleControl = _joystickStyleControl;
+@synthesize motionManager = _motionManager;
+@synthesize remoteViewController = _remoteViewController;
+@synthesize accelX = _accelX;
+@synthesize accelY = _accelY;
+@synthesize accelZ = _accelZ;
+@synthesize joystickSizeSlider = _joystickSizeSlider;
 
 AppController *gApp;
 
+static AppController* _sharedInstance = nil;
+
++ (AppController*)sharedInstance {
+    if (!_sharedInstance) {
+        _sharedInstance = [[AppController alloc] init];
+    }
+    return _sharedInstance;
+}
+
+- (id)init {
+    if ((self = [super init])) {
+        [[NSNotificationCenter defaultCenter] addObserver:self
+                                                 selector:@selector(controllerConnected:)
+                                                     name:GCControllerDidConnectNotification
+                                                   object:nil];
+        [[NSNotificationCenter defaultCenter] addObserver:self
+                                                 selector:@selector(controllerDisconnected:)
+                                                     name:GCControllerDidDisconnectNotification
+                                                   object:nil];
+    }
+    return self;
+}
+
+- (void)dealloc {
+    [[NSNotificationCenter defaultCenter] removeObserver:self];
+    [_window release];
+    [_remoteViewController release];
+    self.navController = nil;
+    self.browserViewController = nil;
+    self.debugTextLabels = nil;
+    self.hoverView = nil;
+    self.setTiltNeutralButton = nil;
+    self.joystickStyleLabel = nil;
+    self.joystickStyleControl = nil;
+    self.logoImage = nil;
+    self.motionManager = nil;
+    self.joystickSizeSlider = nil;
+    [super dealloc];
+}
+
 - (void)_showAlert:(NSString *)title {
-  UIAlertView *alertView =
-      [[UIAlertView alloc] initWithTitle:title
-                                 message:@"Check your networking configuration."
-                                delegate:self
-                       cancelButtonTitle:@"OK"
-                       otherButtonTitles:nil];
-  [alertView show];
-  [alertView release];
+  UIAlertController *alert = [UIAlertController alertControllerWithTitle:title
+                                                               message:@"Check your networking configuration."
+                                                        preferredStyle:UIAlertControllerStyleAlert];
+  UIAlertAction *okAction = [UIAlertAction actionWithTitle:@"OK"
+                                                    style:UIAlertActionStyleDefault
+                                                  handler:nil];
+  [self.navController presentViewController:alert animated:YES completion:nil];
 }
 
 + (AppController *)sharedApp {
@@ -57,10 +123,12 @@ AppController *gApp;
 }
 
 + (void)timerWithInterval:(NSTimeInterval)seconds andBlock:(void (^)())b {
-  [[NSRunLoop currentRunLoop] addTimer:[NSTimer timerWithTimeInterval:seconds
-                                                              repeats:NO
-                                                           usingBlock:b]
-                               forMode:NSDefaultRunLoopMode];
+    NSTimer *timer = [NSTimer timerWithTimeInterval:seconds
+                                           target:[NSBlockOperation blockOperationWithBlock:b]
+                                         selector:@selector(main)
+                                         userInfo:nil
+                                          repeats:NO];
+    [[NSRunLoop currentRunLoop] addTimer:timer forMode:NSDefaultRunLoopMode];
 }
 
 - (void)applicationDidFinishLaunching:(UIApplication *)application {
@@ -106,10 +174,8 @@ AppController *gApp;
     [_navController.view addSubview:_logoImage];
   }
 
-  // turn on accelerometer
-  [[UIAccelerometer sharedAccelerometer] setDelegate:self];
-  [[UIAccelerometer sharedAccelerometer]
-      setUpdateInterval:ACCELEROMETER_UPDATE_RATE];
+  self.motionManager = [[CMMotionManager alloc] init];
+  self.motionManager.accelerometerUpdateInterval = ACCELEROMETER_UPDATE_RATE;
 
   // if controllers are available, handle them
   Class gcClass = NSClassFromString(@"GCController");
@@ -148,151 +214,13 @@ AppController *gApp;
   [AppController debugPrint:@"Controller connected."];
 
   // if this controller has no player set, let's just assign it to 1.
-  // (we dont really use this, but it looks prettier than ambiguous flashing or
-  // whatnot)
   if (controller.playerIndex == GCControllerPlayerIndexUnset) {
     controller.playerIndex = 0;
   }
 
-  // if they have the extended profile:
-  // (note; we could reduce redundant code here by *always* setting common stuff
-  // in the regular profile, but it sounds like theoretically a controller could
-  // lack the regular profile so lets just do everything in extended or
-  // everything in regular)
-  if (controller.extendedGamepad != nil) {
-    controller.extendedGamepad.dpad.valueChangedHandler =
-        ^(GCControllerDirectionPad *dpad, float xValue, float yValue) {
-          [[RemoteViewController sharedRemoteViewController]
-              hardwareDPadChangedX:xValue
-                              andY:yValue];
-        };
-    controller.extendedGamepad.buttonA.valueChangedHandler = ^(
-        GCControllerButtonInput *button, float value, BOOL pressed) {
-      if (pressed) {
-        [[RemoteViewController sharedRemoteViewController] handleJumpPress];
-      } else {
-        [[RemoteViewController sharedRemoteViewController] handleJumpRelease];
-      }
-    };
-    controller.extendedGamepad.buttonB.valueChangedHandler = ^(
-        GCControllerButtonInput *button, float value, BOOL pressed) {
-      if (pressed)
-        [[RemoteViewController sharedRemoteViewController] handleBombPress];
-      else
-        [[RemoteViewController sharedRemoteViewController] handleBombRelease];
-    };
-    controller.extendedGamepad.buttonX.valueChangedHandler = ^(
-        GCControllerButtonInput *button, float value, BOOL pressed) {
-      if (pressed) {
-        [[RemoteViewController sharedRemoteViewController] handlePunchPress];
-      } else {
-        [[RemoteViewController sharedRemoteViewController] handlePunchRelease];
-      }
-    };
-    controller.extendedGamepad.buttonY.valueChangedHandler = ^(
-        GCControllerButtonInput *button, float value, BOOL pressed) {
-      if (pressed) {
-        [[RemoteViewController sharedRemoteViewController] handleThrowPress];
-      } else {
-        [[RemoteViewController sharedRemoteViewController] handleThrowRelease];
-      }
-    };
-    controller.extendedGamepad.leftShoulder.valueChangedHandler = ^(
-        GCControllerButtonInput *button, float value, BOOL pressed) {
-      if (pressed) {
-        [[RemoteViewController sharedRemoteViewController] handleRun1Press];
-      } else {
-        [[RemoteViewController sharedRemoteViewController] handleRun1Release];
-      }
-    };
-    controller.extendedGamepad.rightShoulder.valueChangedHandler = ^(
-        GCControllerButtonInput *button, float value, BOOL pressed) {
-      if (pressed) {
-        [[RemoteViewController sharedRemoteViewController] handleRun2Press];
-      } else {
-        [[RemoteViewController sharedRemoteViewController] handleRun2Release];
-      }
-    };
-    controller.extendedGamepad.leftTrigger.valueChangedHandler = ^(
-        GCControllerButtonInput *button, float value, BOOL pressed) {
-      if (pressed) {
-        [[RemoteViewController sharedRemoteViewController] handleRun3Press];
-      } else {
-        [[RemoteViewController sharedRemoteViewController] handleRun3Release];
-      }
-    };
-    controller.extendedGamepad.rightTrigger.valueChangedHandler = ^(
-        GCControllerButtonInput *button, float value, BOOL pressed) {
-      if (pressed) {
-        [[RemoteViewController sharedRemoteViewController] handleRun4Press];
-      } else {
-        [[RemoteViewController sharedRemoteViewController] handleRun4Release];
-      }
-    };
-    controller.extendedGamepad.leftThumbstick.valueChangedHandler =
-        ^(GCControllerDirectionPad *dpad, float xValue, float yValue) {
-          [[RemoteViewController sharedRemoteViewController]
-              hardwareStickChangedX:xValue
-                               andY:yValue];
-        };
-  }
-  // otherwise try the regular profile:
-  else if (controller.gamepad != nil) {
-    controller.gamepad.dpad.valueChangedHandler =
-        ^(GCControllerDirectionPad *dpad, float xValue, float yValue) {
-          [[RemoteViewController sharedRemoteViewController]
-              hardwareDPadChangedX:xValue
-                              andY:yValue];
-        };
-    controller.gamepad.buttonA.valueChangedHandler = ^(
-        GCControllerButtonInput *button, float value, BOOL pressed) {
-      if (pressed) {
-        [[RemoteViewController sharedRemoteViewController] handleJumpPress];
-      } else {
-        [[RemoteViewController sharedRemoteViewController] handleJumpRelease];
-      }
-    };
-    controller.gamepad.buttonB.valueChangedHandler = ^(
-        GCControllerButtonInput *button, float value, BOOL pressed) {
-      if (pressed) {
-        [[RemoteViewController sharedRemoteViewController] handleBombPress];
-      } else {
-        [[RemoteViewController sharedRemoteViewController] handleBombRelease];
-      }
-    };
-    controller.gamepad.buttonX.valueChangedHandler = ^(
-        GCControllerButtonInput *button, float value, BOOL pressed) {
-      if (pressed) {
-        [[RemoteViewController sharedRemoteViewController] handlePunchPress];
-      } else {
-        [[RemoteViewController sharedRemoteViewController] handlePunchRelease];
-      }
-    };
-    controller.gamepad.buttonY.valueChangedHandler = ^(
-        GCControllerButtonInput *button, float value, BOOL pressed) {
-      if (pressed) {
-        [[RemoteViewController sharedRemoteViewController] handleThrowPress];
-      } else {
-        [[RemoteViewController sharedRemoteViewController] handleThrowRelease];
-      }
-    };
-    controller.gamepad.leftShoulder.valueChangedHandler = ^(
-        GCControllerButtonInput *button, float value, BOOL pressed) {
-      if (pressed) {
-        [[RemoteViewController sharedRemoteViewController] handleRun1Press];
-      } else {
-        [[RemoteViewController sharedRemoteViewController] handleRun1Release];
-      }
-    };
-    controller.gamepad.rightShoulder.valueChangedHandler = ^(
-        GCControllerButtonInput *button, float value, BOOL pressed) {
-      if (pressed) {
-        [[RemoteViewController sharedRemoteViewController] handleRun2Press];
-      } else {
-        [[RemoteViewController sharedRemoteViewController] handleRun2Release];
-      }
-    };
-  }
+  // Setup the controller using our new method
+  [self setupGameController:controller];
+
   // all controllers should have this..
   controller.controllerPausedHandler = ^(GCController *controller) {
     [[RemoteViewController sharedRemoteViewController] handleMenu];
@@ -301,20 +229,6 @@ AppController *gApp;
 
 - (void)removeController:(GCController *)controller {
   [AppController debugPrint:@"Controller disconnected."];
-}
-
-- (void)dealloc {
-  self.navController = nil;
-  self.browserViewController = nil;
-  self.window = nil;
-  self.debugTextLabels = nil;
-  self.hoverView = nil;
-  self.setTiltNeutralButton = nil;
-  self.joystickStyleLabel = nil;
-  self.joystickStyleControl = nil;
-  self.logoImage = nil;
-  [[UIAccelerometer sharedAccelerometer] setDelegate:nil];
-  [super dealloc];
 }
 
 - (void)applicationWillResignActive:(UIApplication *)application {
@@ -345,17 +259,17 @@ AppController *gApp;
 
   if (haveControllers) {
     if (UI_USER_INTERFACE_IDIOM() == UIUserInterfaceIdiomPad) {
+      frame = CGRectMake(0, 0, 300, 350);
+    }
+    else {
+      frame = CGRectMake(0, 0, 300, 320);
+    }
+  } else {
+    if (UI_USER_INTERFACE_IDIOM() == UIUserInterfaceIdiomPad) {
       frame = CGRectMake(0, 0, 300, 290);
     }
     else {
       frame = CGRectMake(0, 0, 300, 260);
-    }
-  } else {
-    if (UI_USER_INTERFACE_IDIOM() == UIUserInterfaceIdiomPad) {
-      frame = CGRectMake(0, 0, 300, 230);
-    }
-    else {
-      frame = CGRectMake(0, 0, 300, 200);
     }
   }
   frame.origin.x =
@@ -382,6 +296,9 @@ AppController *gApp;
       [defaults objectForKey:@"controllerDPadSensitivity"] == nil
           ? DEFAULT_CONTROLLER_DPAD_SENSITIVITY
           : [defaults floatForKey:@"controllerDPadSensitivity"];
+  float joystickSize = [defaults objectForKey:@"joystickSize"] == nil
+                          ? 1.0
+                          : [defaults floatForKey:@"joystickSize"];
 
   {
     l = [[UILabel alloc] initWithFrame:CGRectMake(0, 35, 300, 20)];
@@ -462,12 +379,33 @@ AppController *gApp;
   if (haveControllers) {
     l = [[UILabel alloc] initWithFrame:CGRectMake(0, 185, 300, 20)];
     l.textColor = [UIColor whiteColor];
-    l.textAlignment = UITextAlignmentCenter;
+    l.textAlignment = NSTextAlignmentCenter;
+    l.backgroundColor = [UIColor clearColor];
+    l.text = [NSString stringWithFormat:@"Joystick Size:"];
+    l.hidden = tiltMode ? TRUE : FALSE;
+    [_hoverView addSubview:l];
+
+    self.joystickSizeSlider = [[UISlider alloc] initWithFrame:CGRectMake(50, 215, 200, 23)];
+    [_hoverView addSubview:_joystickSizeSlider];
+    _joystickSizeSlider.minimumValue = 0.5;
+    _joystickSizeSlider.maximumValue = 2.0;
+    _joystickSizeSlider.value = joystickSize;
+    _joystickSizeSlider.continuous = NO;
+    _joystickSizeSlider.hidden = tiltMode ? TRUE : FALSE;
+    [_joystickSizeSlider addTarget:self
+                    action:@selector(joystickSizeChanged:)
+          forControlEvents:UIControlEventValueChanged];
+  }
+
+  if (haveControllers) {
+    l = [[UILabel alloc] initWithFrame:CGRectMake(0, 245, 300, 20)];
+    l.textColor = [UIColor whiteColor];
+    l.textAlignment = NSTextAlignmentCenter;
     l.backgroundColor = [UIColor clearColor];
     l.text = [NSString stringWithFormat:@"Controller DPad Sensitivity:"];
     [_hoverView addSubview:l];
 
-    _dPadSlider = [[UISlider alloc] initWithFrame:CGRectMake(50, 215, 200, 23)];
+    _dPadSlider = [[UISlider alloc] initWithFrame:CGRectMake(50, 275, 200, 23)];
     [_hoverView addSubview:_dPadSlider];
     _dPadSlider.minimumValue = 0.0;
     _dPadSlider.maximumValue = 1.0;
@@ -503,10 +441,18 @@ AppController *gApp;
       controllerDPadSensitivityChanged:_dPadSlider.value];
 }
 
+- (void)joystickSizeChanged:(id)sender {
+  [[NSUserDefaults standardUserDefaults] setFloat:_joystickSizeSlider.value
+                                           forKey:@"joystickSize"];
+  [[NSUserDefaults standardUserDefaults] synchronize];
+  [[RemoteViewController sharedRemoteViewController]
+      joystickSizeChanged:_joystickSizeSlider.value];
+}
+
 - (void)setTiltNeutral {
 
   float tiltY, tiltZ;
-  switch (self.navController.interfaceOrientation) {
+  switch ([[UIApplication sharedApplication] statusBarOrientation]) {
   case UIInterfaceOrientationPortrait:
     tiltY = _accelY;
     tiltZ = _accelZ;
@@ -537,29 +483,50 @@ AppController *gApp;
                           z:tiltZ];
 }
 
-- (void)accelerometer:(UIAccelerometer *)accelerometer
-        didAccelerate:(UIAcceleration *)acceleration {
-  // store the current accel in case they poke the 'set neutral' button
-  _accelX = acceleration.x;
-  _accelY = acceleration.y;
-  _accelZ = acceleration.z;
-
-  [[RemoteViewController sharedRemoteViewController]
-      accelerometer:accelerometer
-      didAccelerate:acceleration];
+- (void)startAccelerometerUpdates {
+  if (self.motionManager.accelerometerAvailable) {
+    [self.motionManager startAccelerometerUpdatesToQueue:[NSOperationQueue mainQueue]
+                                            withHandler:^(CMAccelerometerData *accelerometerData, NSError *error) {
+      if (error) {
+        NSLog(@"Error: %@", error);
+        return;
+      }
+      [self handleAccelerometerData:accelerometerData];
+    }];
+  }
 }
 
-- (void)tiltModeChanged:(id)caller {
-  int val =
-      static_cast<int>(((UISegmentedControl *)caller).selectedSegmentIndex);
-  [[NSUserDefaults standardUserDefaults] setBool:val forKey:@"tiltMode"];
+- (void)stopAccelerometerUpdates {
+  [self.motionManager stopAccelerometerUpdates];
+}
+
+- (void)handleAccelerometerData:(CMAccelerometerData *)accelerometerData {
+  // Store the current accel in case they poke the 'set neutral' button
+  _accelX = accelerometerData.acceleration.x;
+  _accelY = accelerometerData.acceleration.y;
+  _accelZ = accelerometerData.acceleration.z;
+
+  [[RemoteViewController sharedRemoteViewController] handleAccelerometerData:accelerometerData];
+}
+
+- (void)tiltModeChanged:(id)sender {
+  UISegmentedControl *s = (UISegmentedControl *)sender;
+  BOOL tiltMode = s.selectedSegmentIndex;
+  [[NSUserDefaults standardUserDefaults] setBool:tiltMode forKey:@"tiltMode"];
   [[NSUserDefaults standardUserDefaults] synchronize];
-  self.setTiltNeutralButton.titleLabel.alpha = val ? 1.0 : 0.2;
-  self.setTiltNeutralButton.hidden = val ? FALSE : TRUE;
-  self.joystickStyleLabel.hidden = val ? TRUE : FALSE;
-  self.joystickStyleControl.hidden = val ? TRUE : FALSE;
   [[RemoteViewController sharedRemoteViewController]
-      tiltModeChanged:[NSNumber numberWithInt:val]];
+      tiltModeChanged:[NSNumber numberWithBool:tiltMode]];
+  _setTiltNeutralButton.hidden = !tiltMode;
+  _setTiltNeutralButton.titleLabel.alpha = tiltMode ? 1.0 : 0.2;
+  _joystickStyleLabel.hidden = tiltMode;
+  _joystickStyleControl.hidden = tiltMode;
+  _joystickSizeSlider.hidden = tiltMode;
+  
+  if (tiltMode) {
+    [self startAccelerometerUpdates];
+  } else {
+    [self stopAccelerometerUpdates];
+  }
 }
 
 - (void)joystickFloatingChanged:(id)caller {
@@ -658,6 +625,134 @@ AppController *gApp;
                        [gApp.debugTextLabels removeObject:l];
                      }];
                }];
+}
+
+- (void)handleDpadInput:(float)xValue yValue:(float)yValue {
+    [self.remoteViewController handleDpadInput:xValue yValue:yValue];
+}
+
+- (void)handleButtonA:(BOOL)pressed {
+    [self.remoteViewController handleButtonA:pressed];
+}
+
+- (void)handleButtonB:(BOOL)pressed {
+    [self.remoteViewController handleButtonB:pressed];
+}
+
+- (void)handleButtonX:(BOOL)pressed {
+    [self.remoteViewController handleButtonX:pressed];
+}
+
+- (void)handleButtonY:(BOOL)pressed {
+    [self.remoteViewController handleButtonY:pressed];
+}
+
+- (void)handleLeftShoulder:(BOOL)pressed {
+    [self.remoteViewController handleLeftShoulder:pressed];
+}
+
+- (void)handleRightShoulder:(BOOL)pressed {
+    [self.remoteViewController handleRightShoulder:pressed];
+}
+
+- (void)handleLeftTrigger:(BOOL)pressed {
+    [self.remoteViewController handleLeftTrigger:pressed];
+}
+
+- (void)handleRightTrigger:(BOOL)pressed {
+    [self.remoteViewController handleRightTrigger:pressed];
+}
+
+- (void)handleLeftThumbstick:(float)xValue yValue:(float)yValue {
+    [self.remoteViewController handleLeftThumbstick:xValue yValue:yValue];
+}
+
+- (void)setupGameController:(GCController *)controller {
+  if (controller.extendedGamepad != nil) {
+    controller.extendedGamepad.dpad.valueChangedHandler = ^(GCControllerDirectionPad *dpad, float xValue, float yValue) {
+      [self handleDpadInput:xValue yValue:yValue];
+    };
+    
+    controller.extendedGamepad.buttonA.valueChangedHandler = ^(GCControllerButtonInput *button, float value, BOOL pressed) {
+      [self handleButtonA:pressed];
+    };
+    
+    controller.extendedGamepad.buttonB.valueChangedHandler = ^(GCControllerButtonInput *button, float value, BOOL pressed) {
+      [self handleButtonB:pressed];
+    };
+    
+    controller.extendedGamepad.buttonX.valueChangedHandler = ^(GCControllerButtonInput *button, float value, BOOL pressed) {
+      [self handleButtonX:pressed];
+    };
+    
+    controller.extendedGamepad.buttonY.valueChangedHandler = ^(GCControllerButtonInput *button, float value, BOOL pressed) {
+      [self handleButtonY:pressed];
+    };
+    
+    controller.extendedGamepad.leftShoulder.valueChangedHandler = ^(GCControllerButtonInput *button, float value, BOOL pressed) {
+      [self handleLeftShoulder:pressed];
+    };
+    
+    controller.extendedGamepad.rightShoulder.valueChangedHandler = ^(GCControllerButtonInput *button, float value, BOOL pressed) {
+      [self handleRightShoulder:pressed];
+    };
+    
+    controller.extendedGamepad.leftTrigger.valueChangedHandler = ^(GCControllerButtonInput *button, float value, BOOL pressed) {
+      [self handleLeftTrigger:pressed];
+    };
+    
+    controller.extendedGamepad.rightTrigger.valueChangedHandler = ^(GCControllerButtonInput *button, float value, BOOL pressed) {
+      [self handleRightTrigger:pressed];
+    };
+    
+    controller.extendedGamepad.leftThumbstick.valueChangedHandler = ^(GCControllerDirectionPad *dpad, float xValue, float yValue) {
+      [self handleLeftThumbstick:xValue yValue:yValue];
+    };
+  }
+  // otherwise try the regular profile:
+  else if (controller.gamepad != nil) {
+    controller.gamepad.dpad.valueChangedHandler = ^(GCControllerDirectionPad *dpad, float xValue, float yValue) {
+      [self handleDpadInput:xValue yValue:yValue];
+    };
+    
+    controller.gamepad.buttonA.valueChangedHandler = ^(GCControllerButtonInput *button, float value, BOOL pressed) {
+      [self handleButtonA:pressed];
+    };
+    
+    controller.gamepad.buttonB.valueChangedHandler = ^(GCControllerButtonInput *button, float value, BOOL pressed) {
+      [self handleButtonB:pressed];
+    };
+    
+    controller.gamepad.buttonX.valueChangedHandler = ^(GCControllerButtonInput *button, float value, BOOL pressed) {
+      [self handleButtonX:pressed];
+    };
+    
+    controller.gamepad.buttonY.valueChangedHandler = ^(GCControllerButtonInput *button, float value, BOOL pressed) {
+      [self handleButtonY:pressed];
+    };
+    
+    controller.gamepad.leftShoulder.valueChangedHandler = ^(GCControllerButtonInput *button, float value, BOOL pressed) {
+      [self handleLeftShoulder:pressed];
+    };
+    
+    controller.gamepad.rightShoulder.valueChangedHandler = ^(GCControllerButtonInput *button, float value, BOOL pressed) {
+      [self handleRightShoulder:pressed];
+    };
+  }
+}
+
+- (void)controllerConnected:(NSNotification*)notification {
+    GCController* controller = notification.object;
+    [self setupGameController:controller];
+}
+
+- (void)controllerDisconnected:(NSNotification*)notification {
+    // Handle controller disconnection if needed
+}
+
+- (void)didSelectAddress:(struct sockaddr*)addr withSize:(socklen_t)size {
+    // Handle the selected address
+    // This will be implemented when needed
 }
 
 @end

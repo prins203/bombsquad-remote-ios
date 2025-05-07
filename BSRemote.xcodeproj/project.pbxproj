@@ -66,6 +66,7 @@
 		57F51C1E12EC24C200B63B25 /* thumbPressed@2x.png in Resources */ = {isa = PBXBuildFile; fileRef = 57F51C1C12EC24C200B63B25 /* thumbPressed@2x.png */; };
 		57F5209E12ED49A100B63B25 /* controllerBG~ipad.png in Resources */ = {isa = PBXBuildFile; fileRef = 57F5209D12ED49A100B63B25 /* controllerBG~ipad.png */; };
 		57FAF1322216450800451D90 /* Media.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 57FAF1312216450800451D90 /* Media.xcassets */; };
+		1D6058910D05DD3E006BFB54 /* CoreMotion.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1D6058900D05DD3E006BFB54 /* CoreMotion.framework */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -138,6 +139,7 @@
 		57F51C1C12EC24C200B63B25 /* thumbPressed@2x.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; name = "thumbPressed@2x.png"; path = "Resources/Images/thumbPressed@2x.png"; sourceTree = "<group>"; };
 		57F5209D12ED49A100B63B25 /* controllerBG~ipad.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; name = "controllerBG~ipad.png"; path = "Resources/Images/controllerBG~ipad.png"; sourceTree = "<group>"; };
 		57FAF1312216450800451D90 /* Media.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Media.xcassets; sourceTree = "<group>"; };
+		1D6058900D05DD3E006BFB54 /* CoreMotion.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreMotion.framework; path = System/Library/Frameworks/CoreMotion.framework; sourceTree = SDKROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -151,6 +153,7 @@
 				2B9195C911E66BE90007EFA5 /* SystemConfiguration.framework in Frameworks */,
 				2B9195CB11E66BE90007EFA5 /* UIKit.framework in Frameworks */,
 				577713B512DAE6AE002E1CC8 /* QuartzCore.framework in Frameworks */,
+				1D6058910D05DD3E006BFB54 /* CoreMotion.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -416,7 +419,7 @@
 				GCC_PREFIX_HEADER = Prefix.pch;
 				GCC_THUMB_SUPPORT = NO;
 				INFOPLIST_FILE = Info.plist;
-				IPHONEOS_DEPLOYMENT_TARGET = 8.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 12.0;
 				OTHER_CFLAGS = "-DDEBUG=1";
 				"OTHER_LDFLAGS[sdk=iphoneos*][arch=*]" = (
 					"-framework",
@@ -448,7 +451,7 @@
 				GCC_PREFIX_HEADER = Prefix.pch;
 				GCC_THUMB_SUPPORT = NO;
 				INFOPLIST_FILE = Info.plist;
-				IPHONEOS_DEPLOYMENT_TARGET = 8.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 12.0;
 				"OTHER_LDFLAGS[sdk=iphoneos*][arch=*]" = (
 					"-framework",
 					CFNetwork,
@@ -514,7 +517,7 @@
 				GCC_PREFIX_HEADER = Prefix.pch;
 				GCC_THUMB_SUPPORT = NO;
 				INFOPLIST_FILE = Info.plist;
-				IPHONEOS_DEPLOYMENT_TARGET = 8.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 12.0;
 				"OTHER_LDFLAGS[sdk=iphoneos*][arch=*]" = (
 					"-framework",
 					CFNetwork,

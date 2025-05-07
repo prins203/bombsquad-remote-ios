@@ -45,16 +45,32 @@
   // e.g. self.myOutlet = nil;
 }
 
-- (BOOL)shouldAutorotateToInterfaceOrientation:
-    (UIInterfaceOrientation)interfaceOrientationIn {
-  // iPad works any which way.. iPhone only landscape
-  // FIXME - can't we just specify this in the info.plist?
-  if (UI_USER_INTERFACE_IDIOM() == UIUserInterfaceIdiomPad) {
+- (void)donePressed {
+    [self dismissViewControllerAnimated:YES completion:nil];
+}
+
+- (void)viewWillAppear:(BOOL)animated {
+    [super viewWillAppear:animated];
+}
+
+- (void)viewDidAppear:(BOOL)animated {
+    [super viewDidAppear:animated];
+}
+
+- (void)viewWillDisappear:(BOOL)animated {
+    [super viewWillDisappear:animated];
+}
+
+- (void)viewDidDisappear:(BOOL)animated {
+    [super viewDidDisappear:animated];
+}
+
+- (BOOL)shouldAutorotate {
     return YES;
-  } else {
-    return (interfaceOrientationIn == UIInterfaceOrientationLandscapeLeft ||
-            interfaceOrientationIn == UIInterfaceOrientationLandscapeRight);
-  }
+}
+
+- (UIInterfaceOrientationMask)supportedInterfaceOrientations {
+    return UIInterfaceOrientationMaskAll;
 }
 
 @end

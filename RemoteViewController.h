@@ -1,6 +1,7 @@
 #import "AppController.h"
 #import <UIKit/UIKit.h>
 #include <netinet/in.h>
+#import <CoreMotion/CoreMotion.h>
 
 #define REMOTE_VIEW_CONTROLLER_MAX_ADDRESSES 10
 
@@ -86,6 +87,7 @@ enum BSRemoteMsg {
   int _addressSizes[REMOTE_VIEW_CONTROLLER_MAX_ADDRESSES];
 
   float _controllerDPadSensitivity;
+  float _joystickSize;
 
   // struct sockaddr_in _targetAddr;
   // int _targetAddrSize;
@@ -98,6 +100,10 @@ enum BSRemoteMsg {
 
   float _ping;
   BOOL _newStyle;
+
+  float _accelX;
+  float _accelY;
+  float _accelZ;
 }
 
 + (RemoteViewController *)sharedRemoteViewController;
@@ -139,6 +145,19 @@ enum BSRemoteMsg {
 
 - (void)handleMenu;
 
+// Controller input handlers
+- (void)handleDpadInput:(float)xValue yValue:(float)yValue;
+- (void)handleButtonA:(BOOL)pressed;
+- (void)handleButtonB:(BOOL)pressed;
+- (void)handleButtonX:(BOOL)pressed;
+- (void)handleButtonY:(BOOL)pressed;
+- (void)handleLeftShoulder:(BOOL)pressed;
+- (void)handleRightShoulder:(BOOL)pressed;
+- (void)handleLeftTrigger:(BOOL)pressed;
+- (void)handleRightTrigger:(BOOL)pressed;
+- (void)handleLeftThumbstick:(float)xValue yValue:(float)yValue;
+- (void)handleAccelerometerData:(CMAccelerometerData *)accelerometerData;
+
 @property(nonatomic, retain) NSTimer *processTimer;
 //@property (nonatomic, retain) UIImageView *buttonBackingImage;
 @property(nonatomic, retain) UIView *buttonBacking;
@@ -166,5 +185,7 @@ enum BSRemoteMsg {
 @property(nonatomic, retain) NSMutableSet *validMovedTouches;
 
 //@property (nonatomic, retain) UIImageView *logoImage;
+
+- (void)joystickSizeChanged:(float)value;
 
 @end
